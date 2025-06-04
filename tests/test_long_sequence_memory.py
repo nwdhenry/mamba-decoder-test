@@ -1,3 +1,5 @@
+"""Stress test ensuring large sequence lengths do not OOM."""
+
 import torch
 from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
 from mamba_ssm.models.config_mamba import MambaConfig

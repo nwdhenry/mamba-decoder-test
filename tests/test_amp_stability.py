@@ -1,3 +1,5 @@
+"""Tests for AMP stability during a single training step."""
+
 import torch
 from torch.cuda.amp import autocast, GradScaler
 from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
@@ -5,6 +7,7 @@ from mamba_ssm.models.config_mamba import MambaConfig
 
 
 def test_amp_training_step():
+    """Verify that AMP training executes without NaNs."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cfg = MambaConfig(d_model=64, n_layer=2, vocab_size=100)
     model = MambaLMHeadModel(cfg, device=device)

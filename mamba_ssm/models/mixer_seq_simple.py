@@ -1,4 +1,9 @@
-# Copyright (c) 2023, Albert Gu, Tri Dao.
+"""Minimal implementation of the Mamba language model.
+
+This module provides a simplified version of the Mamba architecture used for
+testing and benchmarking. Only CPU compatible components are included to ensure
+the model can run in constrained environments.
+"""
 
 import math
 from functools import partial
@@ -40,6 +45,40 @@ def create_block(
     device=None,
     dtype=None,
 ):
+    """Assemble a single Mixer/Attention block.
+
+    Parameters
+    ----------
+    d_model : int
+        Hidden dimension of the block.
+    d_intermediate : int
+        Intermediate MLP dimension. ``0`` disables the MLP.
+    ssm_cfg : dict, optional
+        Configuration for the Mamba selective state space module.
+    attn_layer_idx : list[int], optional
+        Indices of layers to use attention instead of Mamba.
+    attn_cfg : dict, optional
+        Extra arguments for attention layers.
+    norm_epsilon : float, default=1e-5
+        Epsilon value for layer normalization.
+    rms_norm : bool, default=False
+        Use RMSNorm instead of LayerNorm when ``True``.
+    residual_in_fp32 : bool, default=False
+        Store residuals in ``float32`` for stability.
+    fused_add_norm : bool, default=False
+        Enable Triton fused add-norm kernel.
+    layer_idx : int, optional
+        Index of the current block.
+    device : torch.device, optional
+        Device used for newly created tensors.
+    dtype : torch.dtype, optional
+        Data type for module parameters.
+
+    Returns
+    -------
+    Block
+        Configured :class:`Block` instance.
+    """
     if ssm_cfg is None:
         ssm_cfg = {}
     if attn_layer_idx is None:
@@ -90,6 +129,21 @@ def _init_weights(
     rescale_prenorm_residual=True,
     n_residuals_per_layer=1,  # Change to 2 if we have MLP
 ):
+    """Initialize module weights following NanoGPT style.
+
+    Parameters
+    ----------
+    module : torch.nn.Module
+        Module whose parameters will be initialized.
+    n_layer : int
+        Total number of transformer layers in the model.
+    initializer_range : float, default=0.02
+        Standard deviation used for embedding initialization.
+    rescale_prenorm_residual : bool, default=True
+        If ``True``, apply scaled initialization to residual layers.
+    n_residuals_per_layer : int, default=1
+        Number of residual connections per layer.
+    """
     if isinstance(module, nn.Linear):
         if module.bias is not None:
             if not getattr(module.bias, "_no_reinit", False):
@@ -116,6 +170,39 @@ def _init_weights(
 
 
 class MixerModel(nn.Module):
+    """Stack of Mixer/Mamba blocks used as the model backbone.
+
+    Parameters
+    ----------
+    d_model : int
+        Embedding dimension.
+    n_layer : int
+        Number of blocks in the model.
+    d_intermediate : int
+        Hidden size of the MLP inside each block.
+    vocab_size : int
+        Size of the token vocabulary.
+    ssm_cfg : dict, optional
+        Configuration for the Mamba block.
+    attn_layer_idx : list[int], optional
+        Layers that should use attention instead of Mamba.
+    attn_cfg : dict, optional
+        Additional settings for attention layers.
+    norm_epsilon : float, default=1e-5
+        Epsilon value for normalization layers.
+    rms_norm : bool, default=False
+        Use RMSNorm in place of LayerNorm when ``True``.
+    initializer_cfg : dict, optional
+        Parameters controlling weight initialization.
+    fused_add_norm : bool, default=False
+        Enable Triton fused add-norm kernels.
+    residual_in_fp32 : bool, default=False
+        Store residual connections in ``float32``.
+    device : torch.device, optional
+        Device on which to allocate the model.
+    dtype : torch.dtype, optional
+        Desired parameter data type.
+    """
     def __init__(
         self,
         d_model: int,
@@ -215,6 +302,7 @@ class MixerModel(nn.Module):
 
 
 class MambaLMHeadModel(nn.Module, GenerationMixin):
+    """Language model head on top of :class:`MixerModel`."""
 
     def __init__(
         self,
