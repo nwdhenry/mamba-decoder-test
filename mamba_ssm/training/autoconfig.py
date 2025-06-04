@@ -64,7 +64,7 @@ def autotune_batch_size(buffer: float = 1.0, max_batch_size: int = 8) -> int:
 class ContextLenWarmup:
     start: int = 512
     target: int = 2048
-    steps: int = 1000
+    steps: int = 10_000
 
     def get(self, step: int) -> int:
         if step >= self.steps:
