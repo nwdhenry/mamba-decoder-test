@@ -140,8 +140,16 @@ def main():
                         print(f"[WARN] OOM encountered. Reducing batch size to {args.batch_size}")
                         continue
                     else:
-                        print("[ERROR] OOM with batch size 1. Skipping batch.")
-                        continue
+                        if ds.seq_len > 512:
+                            ds.seq_len = 512
+                            warmup.start = min(warmup.start, 512)
+                            warmup.target = 512
+                            loader = DataLoader(ds, batch_size=args.batch_size)
+                            print("[WARN] OOM with batch size 1. Reducing sequence length to 512")
+                            continue
+                        else:
+                            print("[ERROR] OOM with batch size 1. Skipping batch.")
+                            continue
                 else:
                     raise
             step += 1
