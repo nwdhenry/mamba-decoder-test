@@ -137,7 +137,9 @@ class MixerModel(nn.Module):
         super().__init__()
         self.residual_in_fp32 = residual_in_fp32
 
-        self.embedding = nn.Embedding(vocab_size, d_model, **factory_kwargs)
+        self.embedding = nn.Embedding(
+            vocab_size, d_model, padding_idx=0, **factory_kwargs
+        )
 
         # We change the order of residual and layer norm:
         # Instead of LN -> Attn / MLP -> Add, we do:
