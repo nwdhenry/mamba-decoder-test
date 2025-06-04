@@ -13,8 +13,8 @@ from einops import rearrange, repeat
 def test_generation():
     batch = 3
     seqlen = 20
-    device = "cuda"
-    dtype = torch.float16
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
     config = MambaConfig(
         d_model=1024,
@@ -47,8 +47,8 @@ def test_generation_varlen():
     seqlens = [170, 65, 100]
     genlen = 20
     total_seqlen = sum(seqlens)
-    device = "cuda"
-    dtype = torch.float16
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
     config = MambaConfig(
         d_model=1024,
