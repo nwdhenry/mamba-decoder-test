@@ -16,7 +16,6 @@ from mamba_ssm.training.autoconfig import (
     PRESET_CONFIGS,
     ContextLenWarmup,
     autotune_batch_size,
-    detect_free_vram_gb,
     detect_total_vram_gb,
     select_preset_by_vram,
 )
@@ -102,9 +101,8 @@ def main():
     model = MambaGPT(config, device=device, gradient_checkpointing=args.checkpointing)
     model.to(device)
 
-    free_vram = detect_free_vram_gb()
     if args.batch_size == 0:
-        args.batch_size = autotune_batch_size(free_vram)
+        args.batch_size = autotune_batch_size()
 
     warmup = ContextLenWarmup(target=args.seq_len, steps=args.warmup_steps)
     ds = StreamingTextDataset(args.train_file, tokenizer, seq_len=warmup.start)

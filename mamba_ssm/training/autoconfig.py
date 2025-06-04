@@ -32,15 +32,33 @@ def select_preset_by_vram(total_vram_gb: float) -> str:
     else:
         return "base"
 
-def autotune_batch_size(free_mem_gb: float) -> int:
-    if free_mem_gb < 4:
-        return 1
-    elif free_mem_gb < 8:
-        return 2
-    elif free_mem_gb < 16:
-        return 4
-    else:
-        return 8
+def est_batch_vram(batch_size: int) -> float:
+    """Return a rough estimate of VRAM usage in GB for ``batch_size``.
+
+    The heuristic assumes ~2GB of memory is required per sample at the
+    default sequence length.  This should be adjusted for different
+    model sizes or training settings.
+    """
+
+    return batch_size * 2.0
+
+
+def autotune_batch_size(buffer: float = 1.0, max_batch_size: int = 8) -> int:
+    """Heuristically select a batch size that fits in available VRAM.
+
+    Starting from ``1``, the batch size is doubled while the detected
+    free VRAM minus ``buffer`` is larger than the estimated footprint of
+    the current batch. ``est_batch_vram`` assumes roughly 2GB per sample.
+    """
+
+    batch_size = 1
+    while batch_size < max_batch_size:
+        free_mem = detect_free_vram_gb()
+        if free_mem - buffer > est_batch_vram(batch_size):
+            batch_size *= 2
+        else:
+            break
+    return min(batch_size, max_batch_size)
 
 @dataclass
 class ContextLenWarmup:
