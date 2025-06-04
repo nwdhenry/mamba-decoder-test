@@ -96,8 +96,16 @@ class MambaGPT(nn.Module):
         return logits
 
     def num_parameters(self, only_trainable: bool = True) -> int:
-        """Return the number of parameters."""
+        """Return the number of parameters.
+
+        When ``only_trainable`` is ``True`` the number of parameters in
+        :attr:`embed_tokens.weight` is subtracted from the total. This avoids
+        double counting when the embedding weights are tied with the LM head.
+        """
         params: Iterable[torch.Tensor] = (
             p for p in self.parameters() if p.requires_grad or not only_trainable
         )
-        return sum(p.numel() for p in params)
+        num = sum(p.numel() for p in params)
+        if only_trainable:
+            num -= self.embed_tokens.weight.numel()
+        return num
