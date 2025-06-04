@@ -98,10 +98,10 @@ def _init_weights(
         nn.init.normal_(module.weight, std=initializer_range)
 
     if rescale_prenorm_residual:
-        # Reinitialize selected weights subject to the OpenAI GPT-2 Paper Scheme:
+        # Reinitialize selected weights following the NanoGPT initialization scheme:
         #   > A modified initialization which accounts for the accumulation on the residual path with model depth. Scale
         #   > the weights of residual layers at initialization by a factor of 1/√N where N is the # of residual layers.
-        #   >   -- GPT-2 :: https://openai.com/blog/better-language-models/
+        #   >   -- see https://github.com/karpathy/nanoGPT
         #
         # Reference (Megatron-LM): https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/model/gpt_model.py
         for name, p in module.named_parameters():
