@@ -1,3 +1,5 @@
+"""Compare parameter counts against a small GPT-2 model."""
+
 import torch
 from transformers import GPT2Config, GPT2Model
 from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
