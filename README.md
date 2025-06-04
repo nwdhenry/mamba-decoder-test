@@ -36,6 +36,12 @@ Other requirements:
 
 For AMD cards, see additional prerequisites below.
 
+### Setup for local tests
+Install minimal testing dependencies by running:
+```bash
+bash scripts/setup_env.sh
+```
+
 ## Usage
 
 We expose several levels of interface with the Mamba model.

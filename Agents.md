@@ -25,6 +25,12 @@
    - Optimizations → Isolate in `/ops` or `/utils`
 4. **Testing Mandatory**: 100% test coverage for VRAM-critical components
 
+## Environment Setup
+Before running any tests locally, install the minimal dependencies with:
+```bash
+bash scripts/setup_env.sh
+```
+
 ## Development Workflow
 ### For Model Changes:
 ```markdown
