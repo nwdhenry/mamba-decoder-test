@@ -52,7 +52,9 @@ class MambaGPT(nn.Module):
         factory_kwargs = {"device": device, "dtype": dtype}
         self.config = config
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.d_model, **factory_kwargs)
+        self.embed_tokens = nn.Embedding(
+            config.vocab_size, config.d_model, padding_idx=0, **factory_kwargs
+        )
         self.blocks = nn.ModuleList(
             [MambaBlock(config.d_model, i, config.mamba_kwargs, device=device, dtype=dtype) for i in range(config.n_layer)]
         )
