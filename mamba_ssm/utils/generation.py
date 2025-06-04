@@ -1,6 +1,7 @@
 # Copyright (c) 2023, Albert Gu, Tri Dao.
 import gc
 import time
+import warnings
 from collections import namedtuple
 from dataclasses import dataclass, field
 from functools import partial
@@ -11,7 +12,11 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 from torch import Tensor
 from torch.profiler import ProfilerActivity, profile, record_function
-from transformers.generation import GreedySearchDecoderOnlyOutput, SampleDecoderOnlyOutput, TextStreamer
+from transformers.generation import (
+    GreedySearchDecoderOnlyOutput,
+    SampleDecoderOnlyOutput,
+    TextStreamer,
+)
 
 
 @dataclass
@@ -40,6 +45,8 @@ def modify_logits_for_min_p_filtering(logits, min_p):
         return
     indices_to_remove = logits < min_p
     logits.masked_fill_(indices_to_remove, float("-Inf"))
+
+
 # https://github.com/NVIDIA/Megatron-LM/blob/0bb597b42c53355a567aba2a1357cc34b9d99ddd/megatron/text_generation/sampling.py
 # https://github.com/huggingface/transformers/blob/a44985b41cfa2de48a5e1de7f1f93b7483da25d1/src/transformers/generation/logits_process.py#L231
 def modify_logits_for_top_k_filtering(logits, top_k):
@@ -66,7 +73,9 @@ def modify_logits_for_top_p_filtering(logits, top_p):
     logits.masked_fill_(indices_to_remove, float("-inf"))
 
 
-def modify_logit_for_repetition_penalty(logits, prev_output_tokens, repetition_penalty=1.0):
+def modify_logit_for_repetition_penalty(
+    logits, prev_output_tokens, repetition_penalty=1.0
+):
     """Apply repetition penalty. See https://arxiv.org/abs/1909.05858
     logits: (batch_size, vocab_size)
     prev_output_tokens: (batch_size, seq_len)
@@ -75,7 +84,9 @@ def modify_logit_for_repetition_penalty(logits, prev_output_tokens, repetition_p
         return logits
     score = torch.gather(logits, 1, prev_output_tokens)
     # if score < 0 then repetition penalty has to be multiplied to reduce the previous token probability
-    score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
+    score = torch.where(
+        score < 0, score * repetition_penalty, score / repetition_penalty
+    )
     logits.scatter_(1, prev_output_tokens, score)
     return logits
 
@@ -98,7 +109,9 @@ def sample(logits, top_k=1, top_p=0.0, min_p=0.0, temperature=1.0):
             modify_logits_for_top_p_filtering(logits_top, top_p)
             return indices[
                 torch.arange(indices.shape[0], device=indices.device),
-                torch.multinomial(torch.softmax(logits_top, dim=-1), num_samples=1).squeeze(dim=-1),
+                torch.multinomial(
+                    torch.softmax(logits_top, dim=-1), num_samples=1
+                ).squeeze(dim=-1),
             ]
         else:
             if min_p > 0.0:
@@ -108,13 +121,15 @@ def sample(logits, top_k=1, top_p=0.0, min_p=0.0, temperature=1.0):
                 modify_logits_for_min_p_filtering(logits_top, min_prob)
                 if temperature != 1.0:
                     logits_top /= temperature
-                return torch.multinomial(torch.softmax(logits_top, dim=-1), num_samples=1).squeeze(dim=-1)
+                return torch.multinomial(
+                    torch.softmax(logits_top, dim=-1), num_samples=1
+                ).squeeze(dim=-1)
             # Clone so that when we modify for top_p we don't change the original logits
             logits_top = logits / temperature if temperature != 1.0 else logits.clone()
             modify_logits_for_top_p_filtering(logits_top, top_p)
-            return torch.multinomial(torch.softmax(logits_top, dim=-1), num_samples=1).squeeze(
-                dim=-1
-            )
+            return torch.multinomial(
+                torch.softmax(logits_top, dim=-1), num_samples=1
+            ).squeeze(dim=-1)
 
 
 @torch.inference_mode()
@@ -133,7 +148,7 @@ def decode(
     cg=False,
     enable_timing=False,
     output_scores=False,
-    streamer: Optional[TextStreamer] = None
+    streamer: Optional[TextStreamer] = None,
 ):
     """Decoding, either greedy or with top-k or top-p sampling.
     If top-k = 0, don't limit the number of candidates (pure sampling).
@@ -156,19 +171,27 @@ def decode(
     batch_size, seqlen_og = input_ids.shape
     teacher_output_len = teacher_outputs.shape[1] if teacher_outputs is not None else 0
     if cg:
-        if not hasattr(model, "_decoding_cache"):
-            model._decoding_cache = None
-        model._decoding_cache = update_graph_cache(
-            model,
-            model._decoding_cache,
-            batch_size,
-            seqlen_og,
-            max_length,
-        )
-        inference_params = model._decoding_cache.inference_params
-        inference_params.reset(max_length, batch_size)
+        if not torch.cuda.is_available():
+            warnings.warn(
+                "CUDA graph decoding requested but CUDA is not available; falling back to regular decoding."
+            )
+            cg = False
+        else:
+            if not hasattr(model, "_decoding_cache"):
+                model._decoding_cache = None
+            model._decoding_cache = update_graph_cache(
+                model,
+                model._decoding_cache,
+                batch_size,
+                seqlen_og,
+                max_length,
+            )
+            inference_params = model._decoding_cache.inference_params
+            inference_params.reset(max_length, batch_size)
     else:
-        inference_params = InferenceParams(max_seqlen=max_length, max_batch_size=batch_size)
+        inference_params = InferenceParams(
+            max_seqlen=max_length, max_batch_size=batch_size
+        )
 
     def get_logits(input_ids, inference_params):
         decoding = inference_params.seqlen_offset > 0
@@ -195,8 +218,13 @@ def decode(
         return logits[..., :vocab_size] if vocab_size is not None else logits
 
     def sample_tokens(logits, inference_params):
-        if teacher_outputs is None or teacher_output_len <= inference_params.seqlen_offset:
-            token = sample(logits, top_k=top_k, top_p=top_p, min_p=min_p, temperature=temperature)
+        if (
+            teacher_outputs is None
+            or teacher_output_len <= inference_params.seqlen_offset
+        ):
+            token = sample(
+                logits, top_k=top_k, top_p=top_p, min_p=min_p, temperature=temperature
+            )
         else:
             token = teacher_outputs[:, inference_params.seqlen_offset]
         # return rearrange(token, "b -> b 1")
@@ -211,11 +239,16 @@ def decode(
             return True
         return False
 
-    start = torch.cuda.Event(enable_timing=enable_timing)
-    end = torch.cuda.Event(enable_timing=enable_timing)
-
-    if enable_timing:
-        start.record()
+    use_cuda_timer = torch.cuda.is_available() and input_ids.is_cuda
+    if use_cuda_timer:
+        start = torch.cuda.Event(enable_timing=enable_timing)
+        end = torch.cuda.Event(enable_timing=enable_timing)
+        if enable_timing:
+            start.record()
+    else:
+        start = end = None
+        if enable_timing:
+            start_time = time.perf_counter()
     scores, sequences = [], [input_ids]
     sequences_cat = input_ids
     while not should_stop(sequences[-1], inference_params):
@@ -237,10 +270,19 @@ def decode(
     if streamer is not None:
         streamer.end()
     if enable_timing:
-        end.record()
-        torch.cuda.synchronize()
-        print(f"Prompt processing + decoding time: {(start.elapsed_time(end)):.0f}ms")
-    output_cls = GreedySearchDecoderOnlyOutput if top_k == 1 else SampleDecoderOnlyOutput
+        if use_cuda_timer:
+            end.record()
+            torch.cuda.synchronize()
+            print(
+                f"Prompt processing + decoding time: {(start.elapsed_time(end)):.0f}ms"
+            )
+        else:
+            end_time = time.perf_counter()
+            elapsed_ms = (end_time - start_time) * 1000.0
+            print(f"Prompt processing + decoding time: {elapsed_ms:.0f}ms")
+    output_cls = (
+        GreedySearchDecoderOnlyOutput if top_k == 1 else SampleDecoderOnlyOutput
+    )
     return output_cls(sequences=torch.cat(sequences, dim=1), scores=tuple(scores))
 
 
@@ -261,7 +303,15 @@ class GenerationMixin:
         **kwargs,
     ):
         output = decode(
-            input_ids, self, max_length, top_k=top_k, top_p=top_p, min_p = min_p, temperature=temperature, output_scores=output_scores, **kwargs
+            input_ids,
+            self,
+            max_length,
+            top_k=top_k,
+            top_p=top_p,
+            min_p=min_p,
+            temperature=temperature,
+            output_scores=output_scores,
+            **kwargs,
         )
         if not output_scores:
             output.scores = None
@@ -291,6 +341,8 @@ def update_graph_cache(
     dtype=None,
     n_warmups=2,
 ):
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA graph decoding requires CUDA support")
     if cache is None:
         cache = DecodingCGCache()
     param_example = next(iter(model.parameters()))
@@ -308,9 +360,13 @@ def update_graph_cache(
         gc.collect()
         cache.device, cache.dtype = device, dtype
         cache.max_batch_size, cache.max_seqlen = batch_size, max_seqlen
-        assert hasattr(model, "allocate_inference_cache"), "CUDA graph decoding requires that the model has a method allocate_inference_cache"
+        assert hasattr(
+            model, "allocate_inference_cache"
+        ), "CUDA graph decoding requires that the model has a method allocate_inference_cache"
         inf_cache = model.allocate_inference_cache(batch_size, max_seqlen, dtype)
-        lengths_per_sample = torch.full((batch_size,), seqlen_og, dtype=torch.int32, device=device)
+        lengths_per_sample = torch.full(
+            (batch_size,), seqlen_og, dtype=torch.int32, device=device
+        )
         cache.inference_params = InferenceParams(
             max_seqlen=max_seqlen,
             max_batch_size=batch_size,
@@ -333,7 +389,9 @@ def update_graph_cache(
 
     def dispatch(input_ids, position_ids, seqlen):
         batch_size, decoding_seqlen = input_ids.shape[:2]
-        return cache.callables[batch_size, decoding_seqlen](input_ids, position_ids, seqlen)
+        return cache.callables[batch_size, decoding_seqlen](
+            input_ids, position_ids, seqlen
+        )
 
     cache.run = dispatch
     cache.inference_params.seqlen_offset = 0  # Reset so it's not confusing
@@ -341,11 +399,23 @@ def update_graph_cache(
 
 
 def capture_graph(
-    model, inference_params, batch_size, max_seqlen, decoding_seqlen=1, mempool=None, n_warmups=2
+    model,
+    inference_params,
+    batch_size,
+    max_seqlen,
+    decoding_seqlen=1,
+    mempool=None,
+    n_warmups=2,
 ):
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA graph capture requires CUDA support")
     device = next(iter(model.parameters())).device
-    input_ids = torch.full((batch_size, decoding_seqlen), 0, dtype=torch.long, device=device)
-    position_ids = torch.full((batch_size, decoding_seqlen), 0, dtype=torch.long, device=device)
+    input_ids = torch.full(
+        (batch_size, decoding_seqlen), 0, dtype=torch.long, device=device
+    )
+    position_ids = torch.full(
+        (batch_size, decoding_seqlen), 0, dtype=torch.long, device=device
+    )
     seqlen_offset_og = inference_params.seqlen_offset
     inference_params.seqlen_offset = max_seqlen - decoding_seqlen
     inference_params.lengths_per_sample[:] = inference_params.seqlen_offset
