@@ -1,6 +1,7 @@
 import argparse
 from contextlib import nullcontext
 from functools import partial
+import subprocess
 
 import torch
 from torch.utils.data import IterableDataset, DataLoader
@@ -43,9 +44,30 @@ class StreamingTextDataset(IterableDataset):
 
 
 def monitor_vram(threshold_gb: float = 11.0):
-    reserved = torch.cuda.memory_reserved() / 1024 ** 3
-    if reserved > threshold_gb:
-        print(f"[WARNING] VRAM usage {reserved:.2f}GB exceeds {threshold_gb}GB")
+    if not torch.cuda.is_available():
+        return
+
+    usage_gb = torch.cuda.memory_reserved() / 1024 ** 3
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        output = result.stdout.strip()
+        if output:
+            values = [float(line) for line in output.splitlines()]
+            usage_gb = max(usage_gb, max(values) / 1024)
+    except FileNotFoundError:
+        pass
+
+    if usage_gb > threshold_gb:
+        print(f"[WARNING] VRAM usage {usage_gb:.2f}GB exceeds {threshold_gb}GB")
 
 
 def main():
