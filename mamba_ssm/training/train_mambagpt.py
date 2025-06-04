@@ -60,7 +60,7 @@ def main():
     parser.add_argument("--checkpointing", action="store_true")
     parser.add_argument("--preset", type=str, choices=list(PRESET_CONFIGS.keys()))
     parser.add_argument("--auto-config", action="store_true", help="select preset based on VRAM")
-    parser.add_argument("--warmup-steps", type=int, default=1000)
+    parser.add_argument("--warmup-steps", type=int, default=10_000)
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
