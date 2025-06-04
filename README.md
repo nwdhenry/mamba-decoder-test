@@ -193,14 +193,15 @@ python benchmarks/benchmark_generation_mamba_simple.py --model-name "state-space
 
 ## Training
 
-`mamba_ssm/training/train_mambagpt.py` provides a minimal training loop for MambaGPT that fits on 12GB GPUs.
-It streams a text corpus from disk, supports gradient checkpointing and runs with PyTorch AMP.
+`mamba_ssm/training/train_mambagpt.py` provides a minimal training loop for MambaGPT.
+It now contains hardware-aware presets and automatically tunes batch size and context length based on available VRAM.
+The script still streams a text corpus from disk, supports gradient checkpointing and runs with PyTorch AMP.
 
 Example:
 
 ``` sh
 python -m mamba_ssm.training.train_mambagpt \
-  --train-file path/to/text.txt --batch-size 4 --seq-len 128 \
+  --train-file path/to/text.txt --auto-config --batch-size 0 \
   --epochs 1 --fp16 --checkpointing
 ```
 
