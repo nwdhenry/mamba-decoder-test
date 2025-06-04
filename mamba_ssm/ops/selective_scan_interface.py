@@ -17,7 +17,10 @@ except ImportError:
 
 from mamba_ssm.ops.triton.layer_norm import _layer_norm_fwd
 
-import selective_scan_cuda
+try:
+    import selective_scan_cuda
+except ImportError:  # pragma: no cover - optional CUDA extension
+    selective_scan_cuda = None
 
 
 class SelectiveScanFn(torch.autograd.Function):
@@ -43,6 +46,7 @@ class SelectiveScanFn(torch.autograd.Function):
         if C.dim() == 3:
             C = rearrange(C, "b dstate l -> b 1 dstate l")
             ctx.squeeze_C = True
+        # VRAM_CRITICAL
         out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus)
         ctx.delta_softplus = delta_softplus
         ctx.has_z = z is not None
@@ -68,6 +72,7 @@ class SelectiveScanFn(torch.autograd.Function):
         # The kernel supports passing in a pre-allocated dz (e.g., in case we want to fuse the
         # backward of selective_scan_cuda with the backward of chunk).
         # Here we just pass in None and dz will be allocated in the C++ code.
+        # VRAM_CRITICAL
         du, ddelta, dA, dB, dC, dD, ddelta_bias, *rest = selective_scan_cuda.bwd(
             u, delta, A, B, C, D, z, delta_bias, dout, x, out, None, ctx.delta_softplus,
             False  # option to recompute out_z, not used here
@@ -103,13 +108,74 @@ def rms_norm_forward(
     return y
 
 
-def selective_scan_fn(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
-                     return_last_state=False):
-    """if return_last_state is True, returns (out, last_state)
-    last_state has shape (batch, dim, dstate). Note that the gradient of the last state is
-    not considered in the backward pass.
+def selective_scan_fn(
+    u,
+    delta,
+    A,
+    B,
+    C,
+    D=None,
+    z=None,
+    delta_bias=None,
+    delta_softplus=False,
+    return_last_state=False,
+):
+    """Run the selective scan kernel with CPU fallback.
+
+    Parameters
+    ----------
+    u : torch.Tensor
+        Input tensor of shape ``(batch, dim, seqlen)``.
+    delta : torch.Tensor
+        Delta tensor of shape ``(batch, dim, seqlen)``.
+    A, B, C, D : torch.Tensor, optional
+        Selective scan parameters.
+    z : torch.Tensor, optional
+        Multiplicative modulation tensor.
+    delta_bias : torch.Tensor, optional
+        Bias added to ``delta`` before the softplus.
+    delta_softplus : bool, default=False
+        Whether to apply ``softplus`` to ``delta``.
+    return_last_state : bool, default=False
+        If ``True`` also returns the last recurrent state.
+
+    Returns
+    -------
+    torch.Tensor or Tuple[torch.Tensor, torch.Tensor]
+        Output tensor and optionally the last state.
+
+    Notes
+    -----
+    If ``selective_scan_cuda`` is unavailable or CUDA is not accessible, this
+    function falls back to :func:`selective_scan_ref` which is a pure PyTorch
+    implementation.
     """
-    return SelectiveScanFn.apply(u, delta, A, B, C, D, z, delta_bias, delta_softplus, return_last_state)
+    if selective_scan_cuda is None or not torch.cuda.is_available():
+        return selective_scan_ref(
+            u,
+            delta,
+            A,
+            B,
+            C,
+            D,
+            z=z,
+            delta_bias=delta_bias,
+            delta_softplus=delta_softplus,
+            return_last_state=return_last_state,
+        )
+
+    return SelectiveScanFn.apply(
+        u,
+        delta,
+        A,
+        B,
+        C,
+        D,
+        z,
+        delta_bias,
+        delta_softplus,
+        return_last_state,
+    )
 
 
 def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,
@@ -259,7 +325,8 @@ class MambaInnerFn(torch.autograd.Function):
             delta = rearrange(delta, "b d l -> (b l) d", l=L).contiguous()
             delta = rms_norm_forward(delta, dt_rms_weight, bias=None, eps=b_c_dt_rms_eps)
             delta = rearrange(delta, "(b l) d -> b d l", l=L).contiguous()
-        
+
+        # VRAM_CRITICAL
         out, scan_intermediates, out_z = selective_scan_cuda.fwd(
             conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus
         )
@@ -321,6 +388,7 @@ class MambaInnerFn(torch.autograd.Function):
         dx, dz = dxz.chunk(2, dim=1)
         dout = rearrange(dout, "b l e -> e (b l)")
         dout_y = rearrange(out_proj_weight.t() @ dout, "d (b l) -> b d l", l=L)
+        # VRAM_CRITICAL
         dconv1d_out, ddelta, dA, dB, dC, dD, ddelta_bias, dz, out_z = selective_scan_cuda.bwd(
             conv1d_out, delta, A, B, C, D, z, delta_bias, dout_y, scan_intermediates, out, dz,
             ctx.delta_softplus,
@@ -371,14 +439,77 @@ class MambaInnerFn(torch.autograd.Function):
 
 
 def mamba_inner_fn(
-    xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
-    out_proj_weight, out_proj_bias,
-    A, B=None, C=None, D=None, delta_bias=None, B_proj_bias=None,
-    C_proj_bias=None, delta_softplus=True, checkpoint_lvl=1, b_rms_weight= None, c_rms_weight= None, dt_rms_weight= None, b_c_dt_rms_eps=1e-6
+    xz,
+    conv1d_weight,
+    conv1d_bias,
+    x_proj_weight,
+    delta_proj_weight,
+    out_proj_weight,
+    out_proj_bias,
+    A,
+    B=None,
+    C=None,
+    D=None,
+    delta_bias=None,
+    B_proj_bias=None,
+    C_proj_bias=None,
+    delta_softplus=True,
+    checkpoint_lvl=1,
+    b_rms_weight=None,
+    c_rms_weight=None,
+    dt_rms_weight=None,
+    b_c_dt_rms_eps=1e-6,
 ):
-    return MambaInnerFn.apply(xz, conv1d_weight, conv1d_bias, x_proj_weight, delta_proj_weight,
-                              out_proj_weight, out_proj_bias,
-                              A, B, C, D, delta_bias, B_proj_bias, C_proj_bias, delta_softplus, checkpoint_lvl, b_rms_weight, c_rms_weight, dt_rms_weight, b_c_dt_rms_eps)
+    """Fused Mamba block with optional CUDA acceleration.
+
+    Parameters are identical to :func:`MambaInnerFn.apply`.
+
+    Notes
+    -----
+    When ``selective_scan_cuda`` is not available or CUDA is disabled, this
+    function falls back to :func:`mamba_inner_ref`.
+    """
+    if selective_scan_cuda is None or not torch.cuda.is_available():
+        return mamba_inner_ref(
+            xz,
+            conv1d_weight,
+            conv1d_bias,
+            x_proj_weight,
+            delta_proj_weight,
+            out_proj_weight,
+            out_proj_bias,
+            A,
+            B,
+            C,
+            D,
+            delta_bias=delta_bias,
+            B_proj_bias=B_proj_bias,
+            C_proj_bias=C_proj_bias,
+            delta_softplus=delta_softplus,
+        )
+
+    return MambaInnerFn.apply(
+        xz,
+        conv1d_weight,
+        conv1d_bias,
+        x_proj_weight,
+        delta_proj_weight,
+        out_proj_weight,
+        out_proj_bias,
+        A,
+        B,
+        C,
+        D,
+        delta_bias,
+        B_proj_bias,
+        C_proj_bias,
+        delta_softplus,
+        checkpoint_lvl,
+        b_rms_weight,
+        c_rms_weight,
+        dt_rms_weight,
+        b_c_dt_rms_eps,
+    )
 
 
 def mamba_inner_ref(
