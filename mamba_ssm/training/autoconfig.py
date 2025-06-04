@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from typing import Dict
 
 PRESET_CONFIGS: Dict[str, Dict[str, int]] = {
-    "tiny": {"d_model": 256, "n_layer": 8},
-    "small": {"d_model": 512, "n_layer": 12},
-    "base": {"d_model": 768, "n_layer": 12},
+    "tiny": {"d_model": 256, "n_layer": 12},
+    "small": {"d_model": 512, "n_layer": 16},
+    "base": {"d_model": 768, "n_layer": 24},
 }
 
 def detect_total_vram_gb(device=None) -> float:
