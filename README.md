@@ -42,6 +42,13 @@ Install minimal testing dependencies by running:
 bash scripts/setup_env.sh
 ```
 
+### Running tests
+Before executing the test suite, ensure the development environment is prepared:
+```bash
+bash scripts/setup_env.sh
+```
+All tests should be run in **CPU-only** mode to comply with repository guidelines.
+
 ## Usage
 
 We expose several levels of interface with the Mamba model.
