@@ -116,9 +116,10 @@ def sample(logits, top_k=1, top_p=0.0, min_p=0.0, temperature=1.0):
         else:
             if min_p > 0.0:
                 logits_top = logits.clone()
-                max_prob = logits_top[..., 0].item()
+                max_prob = logits_top.max(dim=-1).values
                 min_prob = max_prob * min_p
-                modify_logits_for_min_p_filtering(logits_top, min_prob)
+                for i in range(logits_top.size(0)):
+                    modify_logits_for_min_p_filtering(logits_top[i], min_prob[i].item())
                 if temperature != 1.0:
                     logits_top /= temperature
                 return torch.multinomial(
