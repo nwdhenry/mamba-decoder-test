@@ -2,9 +2,10 @@
 
 import math
 
-import torch
-import torch.nn.functional as F
 import pytest
+torch = pytest.importorskip("torch")
+pytest.importorskip("transformers")
+import torch.nn.functional as F
 
 from einops import rearrange, repeat
 

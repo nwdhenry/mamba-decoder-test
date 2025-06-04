@@ -2,7 +2,9 @@ import sys
 import types
 from unittest import mock
 
-import torch
+import pytest
+torch = pytest.importorskip("torch")
+pytest.importorskip("transformers")
 
 # Provide a dummy selective_scan_cuda so selective_scan_interface imports
 sys.modules.setdefault('selective_scan_cuda', types.ModuleType('selective_scan_cuda'))
