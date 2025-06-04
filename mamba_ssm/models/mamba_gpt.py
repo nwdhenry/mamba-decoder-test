@@ -3,6 +3,7 @@
 
 from dataclasses import dataclass
 from typing import Optional, Iterable
+from functools import partial
 
 import torch
 from torch import nn
@@ -46,7 +47,7 @@ class MambaBlock(nn.Module):
 class MambaGPT(nn.Module):
     """Decoder-only language model built from Mamba blocks."""
 
-    def __init__(self, config: MambaGPTConfig, *, device=None, dtype=None) -> None:
+    def __init__(self, config: MambaGPTConfig, *, device=None, dtype=None, gradient_checkpointing: bool = False) -> None:
         super().__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
         self.config = config
@@ -61,6 +62,16 @@ class MambaGPT(nn.Module):
         if config.tie_embeddings:
             self.lm_head.weight = self.embed_tokens.weight
 
+        self.gradient_checkpointing = gradient_checkpointing
+
+    def enable_gradient_checkpointing(self):
+        """Enable gradient checkpointing for training."""
+        self.gradient_checkpointing = True
+
+    def disable_gradient_checkpointing(self):
+        """Disable gradient checkpointing."""
+        self.gradient_checkpointing = False
+
     def forward(self, input_ids: torch.Tensor, *, inference_params=None) -> torch.Tensor:
         """Compute logits for ``input_ids``.
 
@@ -72,7 +83,12 @@ class MambaGPT(nn.Module):
         """
         hidden_states = self.embed_tokens(input_ids)
         for block in self.blocks:
-            hidden_states = block(hidden_states, inference_params=inference_params)
+            if self.gradient_checkpointing and self.training and inference_params is None:
+                hidden_states = torch.utils.checkpoint.checkpoint(
+                    partial(block, inference_params=None), hidden_states
+                )
+            else:
+                hidden_states = block(hidden_states, inference_params=inference_params)
         hidden_states = self.norm_f(hidden_states)
         logits = self.lm_head(hidden_states)
         return logits

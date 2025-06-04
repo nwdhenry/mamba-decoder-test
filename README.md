@@ -191,6 +191,21 @@ With Mamba-2, you just need to change the model name:
 python benchmarks/benchmark_generation_mamba_simple.py --model-name "state-spaces/mamba2-2.7b" --prompt "My cat wrote all this CUDA code for a new language model and" --topp 0.9 --temperature 0.7 --repetition-penalty 1.2
 ```
 
+## Training
+
+`mamba_ssm/training/train_mambagpt.py` provides a minimal training loop for MambaGPT that fits on 12GB GPUs.
+It streams a text corpus from disk, supports gradient checkpointing and runs with PyTorch AMP.
+
+Example:
+
+``` sh
+python -m mamba_ssm.training.train_mambagpt \
+  --train-file path/to/text.txt --batch-size 4 --seq-len 128 \
+  --epochs 1 --fp16 --checkpointing
+```
+
+The script prints a warning if VRAM usage grows beyond 11GB.
+
 
 ## Troubleshooting
 
