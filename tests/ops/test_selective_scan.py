@@ -8,8 +8,25 @@ import pytest
 
 from einops import rearrange
 
-from mamba_ssm.ops.selective_scan_interface import selective_scan_fn, selective_scan_ref
-from mamba_ssm.ops.selective_scan_interface import mamba_inner_fn, mamba_inner_ref
+import types
+import sys
+
+try:
+    import selective_scan_cuda  # noqa: F401
+    HAS_KERNEL = True
+except Exception:
+    HAS_KERNEL = False
+    sys.modules['selective_scan_cuda'] = types.ModuleType('selective_scan_cuda')
+
+from mamba_ssm.ops.selective_scan_interface import (
+    selective_scan_fn as _selective_scan_fn,
+    selective_scan_ref,
+    mamba_inner_fn as _mamba_inner_fn,
+    mamba_inner_ref,
+)
+
+selective_scan_fn = _selective_scan_fn if HAS_KERNEL else selective_scan_ref
+mamba_inner_fn = _mamba_inner_fn if HAS_KERNEL else mamba_inner_ref
 
 
 # @pytest.mark.parametrize('wtype', [torch.float32, torch.complex64])
@@ -39,7 +56,7 @@ def test_selective_scan(is_variable_B, is_variable_C, varBC_groups, has_D, has_z
                         delta_softplus, return_last_state, seqlen, itype, wtype):
     if varBC_groups > 1 and (not is_variable_B or not is_variable_C):
         pytest.skip()  # This config is not applicable
-    device = 'cuda'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     rtol, atol = (6e-4, 2e-3) if itype == torch.float32 else (3e-3, 5e-3)
     if itype == torch.bfloat16:
         rtol, atol = 3e-2, 5e-2
@@ -158,7 +175,7 @@ def test_selective_scan(is_variable_B, is_variable_C, varBC_groups, has_D, has_z
 @pytest.mark.parametrize("is_variable_B", [False, True])
 # @pytest.mark.parametrize("is_variable_B", [True])
 def test_mamba_inner_fn(is_variable_B, is_variable_C, seqlen, itype, wtype):
-    device = 'cuda'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     rtol, atol = (6e-4, 2e-3) if itype == torch.float32 else (3e-3, 5e-3)
     if itype == torch.bfloat16:
         rtol, atol = 3e-2, 5e-2

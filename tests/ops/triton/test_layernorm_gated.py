@@ -31,7 +31,8 @@ def test_layer_norm_gated(d, dtype, wtype, has_bias, has_z, is_rms_norm, has_gro
         pytest.skip()
     if not norm_before_gate and not is_rms_norm:  # Reference LN isn't implemented for this case yet
         pytest.skip()
-    device = 'cuda'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    dtype = dtype if torch.cuda.is_available() else torch.float32
     rtol, atol = (1e-5, 1e-5) if dtype == torch.float32 else (1e-2, 8e-3)
     group_size = None if not has_group else 64
     # set seed
